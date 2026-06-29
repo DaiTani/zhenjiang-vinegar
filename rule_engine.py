@@ -31,7 +31,7 @@ class ZAVScoringSystem:
         self.beta = beta
         self.fitted = True
 
-    def compute_base(self, sample: dict) -> dict:
+    def compute_base(self, sample: dict, use_ph: bool = True) -> dict:
         """计算规则基础分 (物理/化学可解释)"""
         months = sample.get("醋龄月", 0)
         ethyl_val = sample.get("乙酸乙酯", np.nan)
@@ -39,6 +39,7 @@ class ZAVScoringSystem:
         total_acid = sample.get("总酸", np.nan)
         reducing_sugar = sample.get("还原糖", np.nan)
         total_aa = sample.get("总游离氨基酸", np.nan)
+        ph = sample.get("pH", np.nan)
 
         # f_age: 陈酿贡献 (边际递减饱和)
         if months <= 0:
@@ -120,32 +121,61 @@ class ZAVScoringSystem:
         else:
             fu = min(10.0, 9.0 + (total_aa - 3.0) * 0.2)
 
-        w = {"f_age": 0.30, "f_ethyl": 0.20, "f_tmp": 0.15,
-             "f_acidity": 0.15, "f_sugar": 0.10, "f_umami": 0.10}
+        # f_ph: pH舒适度 (影响柔和感/刺激感)
+        # 镇江香醋理想范围 pH 3.0-3.8, 低于3.0过酸, 高于3.8过淡
+        if pd.isna(ph) or not use_ph:
+            fph = 0.0
+            ph_active = False
+        else:
+            ph_active = True
+            if ph < 2.5:
+                fph = 2.0
+            elif ph < 3.0:
+                fph = 4.0 + (ph - 2.5) * 2.0
+            elif ph <= 3.5:
+                fph = 9.0 + (ph - 3.0) * 2.0
+            elif ph <= 3.8:
+                fph = 10.0
+            elif ph <= 4.2:
+                fph = 10.0 - (ph - 3.8) * 3.75
+            else:
+                fph = max(2.0, 8.5 - (ph - 4.2) * 2.0)
+
+        w = {"f_age": 0.28, "f_ethyl": 0.18, "f_tmp": 0.14,
+             "f_acidity": 0.14, "f_sugar": 0.09, "f_umami": 0.09,
+             "f_ph": 0.08 if use_ph else 0.0}
 
         base = (fa * w["f_age"] + fe * w["f_ethyl"] + ft * w["f_tmp"]
-                + fac * w["f_acidity"] + fs * w["f_sugar"] + fu * w["f_umami"])
+                + fac * w["f_acidity"] + fs * w["f_sugar"] + fu * w["f_umami"]
+                + (fph * w["f_ph"] if use_ph else 0.0))
 
         return {
             "base": base,
             "components": {
                 "f_age": fa, "f_ethyl": fe, "f_tmp": ft,
                 "f_acidity": fac, "f_sugar": fs, "f_umami": fu,
+                "f_ph": fph, "f_ph_active": ph_active,
             },
             "weights": w,
         }
 
     def _raw_to_sensory(self, raw: dict) -> dict:
         """规则分 → 11维感官空间"""
-        fa = raw["components"]["f_age"]
-        fe = raw["components"]["f_ethyl"]
-        ft = raw["components"]["f_tmp"]
-        fac = raw["components"]["f_acidity"]
-        fs = raw["components"]["f_sugar"]
-        fu = raw["components"]["f_umami"]
+        c = raw["components"]
+        fa = c["f_age"]
+        fe = c["f_ethyl"]
+        ft = c["f_tmp"]
+        fac = c["f_acidity"]
+        fs = c["f_sugar"]
+        fu = c["f_umami"]
+        fph = c["f_ph"]
+        ph_active = c.get("f_ph_active", False)
+
+        ph_bonus_soft = fph * 0.3 if ph_active else 0.0
+        ph_penalty_sour = fph * 0.1 if ph_active else 0.0
 
         mapped = {
-            "s_醋酸味": np.clip(fac * 0.6 + fa * 0.2 + fu * 0.2, 1.0, 10.0),
+            "s_醋酸味": np.clip(fac * 0.6 + fa * 0.2 + fu * 0.2 - ph_penalty_sour, 1.0, 10.0),
             "s_苦味": np.clip(8.0 - min(5.0, fa * 0.5 + fac * 0.3), 1.0, 10.0),
             "s_甜味": np.clip(fs * 0.5 + fu * 0.3 + fe * 0.2, 1.0, 10.0),
             "s_咸味": np.clip(4.0 + fac * 0.1, 1.0, 10.0),
@@ -155,22 +185,23 @@ class ZAVScoringSystem:
             "s_炒米香": np.clip(ft * 0.5 + fa * 0.3 + fac * 0.2, 1.0, 10.0),
             "s_米醋香": np.clip(fac * 0.6 + fe * 0.3 + fs * 0.1, 1.0, 10.0),
             "s_持久度": np.clip(fa * 0.6 + ft * 0.2 + fac * 0.2, 1.0, 10.0),
-            "s_柔和度": np.clip(fe * 0.4 + fa * 0.3 + fs * 0.2 + fac * 0.1, 1.0, 10.0),
+            "s_柔和度": np.clip(fe * 0.35 + fa * 0.25 + fs * 0.15 + fac * 0.1 + ph_bonus_soft, 1.0, 10.0),
         }
         return mapped
 
-    def predict(self, sample: dict, explain: bool = True) -> dict:
+    def predict(self, sample: dict, explain: bool = True, use_ph: bool = True) -> dict:
         """
         评分预测
 
         参数:
           sample: dict, 包含醋龄月/总酸/乙酸乙酯/四甲基吡嗪/还原糖/总游离氨基酸
           explain: bool, 是否输出特征贡献度分解
+          use_ph: bool, 是否启用pH维度评分 (默认开启)
 
         返回:
           dict: 包含11维感官评分 + 综合得分 + 等级 + (可选)特征贡献
         """
-        raw = self.compute_base(sample)
+        raw = self.compute_base(sample, use_ph=use_ph)
         base = raw["base"]
         calibrated = self.alpha * base + self.beta
 
@@ -185,26 +216,30 @@ class ZAVScoringSystem:
             "酸度贡献": round(c["f_acidity"] * w["f_acidity"], 3),
             "甜味贡献": round(c["f_sugar"] * w["f_sugar"], 3),
             "鲜味贡献": round(c["f_umami"] * w["f_umami"], 3),
-            "校准偏移": round(self.beta, 3),
-            "规则基础分": round(base, 3),
-            "校准后分": round(calibrated, 3),
         }
+        if use_ph and c.get("f_ph_active", False):
+            contrib["pH贡献"] = round(c["f_ph"] * w["f_ph"], 3)
+
+        contrib["校准偏移"] = round(self.beta, 3)
+        contrib["规则基础分"] = round(base, 3)
+        contrib["校准后分"] = round(calibrated, 3)
 
         result = {
             **{k: round(v, 2) for k, v in sensory.items()},
             "综合得分": round(calibrated, 2),
             "等级": self._grade(calibrated),
+            "_use_ph": use_ph,
         }
         if explain:
             result["特征贡献"] = contrib
 
         return result
 
-    def predict_from_df(self, df: pd.DataFrame, explain: bool = False) -> pd.DataFrame:
+    def predict_from_df(self, df: pd.DataFrame, explain: bool = False, use_ph: bool = True) -> pd.DataFrame:
         """DataFrame批量预测"""
         results = []
         for idx, row in df.iterrows():
-            r = self.predict(row.to_dict(), explain=explain)
+            r = self.predict(row.to_dict(), explain=explain, use_ph=use_ph)
             r["样品"] = idx
             results.append(r)
         return pd.DataFrame(results).set_index("样品")

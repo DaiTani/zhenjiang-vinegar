@@ -121,6 +121,53 @@ HTML_TEMPLATE = """
         }
         .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            padding: 10px 16px;
+            margin-bottom: 16px;
+        }
+        .toggle-label {
+            font-size: 0.88em;
+            color: #a0a0a0;
+        }
+        .toggle-label span {
+            color: #c9a96e;
+            font-size: 0.78em;
+            margin-left: 6px;
+        }
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: rgba(255,255,255,0.15);
+            border-radius: 24px;
+            transition: 0.3s;
+        }
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        .toggle-switch input:checked + .toggle-slider { background: #c9a96e; }
+        .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+
         .btn {
             width: 100%;
             padding: 14px;
@@ -361,6 +408,17 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
 
+                <div class="toggle-row">
+                    <div class="toggle-label">
+                        pH维度评分
+                        <span>(开启后影响柔和度/刺激感)</span>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="use_ph" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
                 <button type="submit" class="btn">🏆 开始评分</button>
             </form>
         </div>
@@ -431,6 +489,7 @@ document.getElementById('scoreForm').onsubmit = async function(e) {
     for (const [k, v] of fd.entries()) {
         data[k] = parseFloat(v) || 0;
     }
+    data.use_ph = document.getElementById('use_ph').checked;
 
     const resp = await fetch('/api/score', {
         method: 'POST',
@@ -467,7 +526,8 @@ document.getElementById('scoreForm').onsubmit = async function(e) {
 
     const contribMap = {
         '陈酿贡献':'陈酿','酯香贡献':'酯香(OAV)','酱香贡献':'酱香(TMP)',
-        '酸度贡献':'酸度','甜味贡献':'甜味','鲜味贡献':'鲜味'
+        '酸度贡献':'酸度','甜味贡献':'甜味','鲜味贡献':'鲜味',
+        'pH贡献':'pH舒适度'
     };
     const contribList = document.getElementById('contribList');
     contribList.innerHTML = '';
@@ -497,7 +557,8 @@ def index():
 @app.route('/api/score', methods=['POST'])
 def api_score():
     data = request.get_json()
-    result = scorer.predict(data, explain=True)
+    use_ph = data.pop('use_ph', True)
+    result = scorer.predict(data, explain=True, use_ph=use_ph)
     return jsonify(result)
 
 
