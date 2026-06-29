@@ -126,20 +126,33 @@ class ZAVScoringSystem:
         if pd.isna(ph) or not use_ph:
             fph = 0.0
             ph_active = False
+            ph_warning = None
         else:
             ph_active = True
-            if ph < 2.5:
+            if ph < 2.0 or ph > 5.5:
+                fph = 0.0
+                ph_warning = f"pH={ph:.2f}超出合理范围[2.0, 5.5], pH维度计0分"
+            elif ph < 2.5:
                 fph = 2.0
+                ph_warning = None
             elif ph < 3.0:
                 fph = 4.0 + (ph - 2.5) * 2.0
+                ph_warning = None
             elif ph <= 3.5:
                 fph = 9.0 + (ph - 3.0) * 2.0
+                ph_warning = None
             elif ph <= 3.8:
                 fph = 10.0
+                ph_warning = None
             elif ph <= 4.2:
                 fph = 10.0 - (ph - 3.8) * 3.75
+                ph_warning = None
+            elif ph <= 5.0:
+                fph = 6.0
+                ph_warning = None
             else:
-                fph = max(2.0, 8.5 - (ph - 4.2) * 2.0)
+                fph = 3.0
+                ph_warning = f"pH={ph:.2f}偏高(>5.0), 评分降低"
 
         w = {"f_age": 0.28, "f_ethyl": 0.18, "f_tmp": 0.14,
              "f_acidity": 0.14, "f_sugar": 0.09, "f_umami": 0.09,
@@ -157,6 +170,7 @@ class ZAVScoringSystem:
                 "f_ph": fph, "f_ph_active": ph_active,
             },
             "weights": w,
+            "ph_warning": ph_warning,
         }
 
     def _raw_to_sensory(self, raw: dict) -> dict:
@@ -230,6 +244,8 @@ class ZAVScoringSystem:
             "等级": self._grade(calibrated),
             "_use_ph": use_ph,
         }
+        if raw.get("ph_warning"):
+            result["ph_warning"] = raw["ph_warning"]
         if explain:
             result["特征贡献"] = contrib
 

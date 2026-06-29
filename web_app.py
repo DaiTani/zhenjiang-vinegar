@@ -248,6 +248,18 @@ HTML_TEMPLATE = """
             margin-top: 4px;
         }
 
+        .warning-box {
+            display: none;
+            background: rgba(255, 200, 100, 0.12);
+            border: 1px solid rgba(255, 200, 100, 0.4);
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-top: 14px;
+            font-size: 0.85em;
+            color: #f0c060;
+        }
+        .warning-box.show { display: block; }
+
         .contribution-section {
             margin-top: 24px;
             padding-top: 20px;
@@ -403,8 +415,8 @@ HTML_TEMPLATE = """
                         <input type="number" name="乙酸" id="乙酸" value="2.31" step="0.01" min="0">
                     </div>
                     <div class="form-group">
-                        <label>pH值</label>
-                        <input type="number" name="pH" id="pH" value="3.65" step="0.01" min="0">
+                        <label>pH值 <span style="color:#888;font-size:0.85em">(2.0-5.5)</span></label>
+                        <input type="number" name="pH" id="pH" value="3.65" step="0.01" min="2.0" max="5.5">
                     </div>
                 </div>
 
@@ -453,6 +465,10 @@ HTML_TEMPLATE = """
                         <div class="val" id="陈酿月">--</div>
                         <div class="lbl">陈酿月数</div>
                     </div>
+                </div>
+
+                <div class="warning-box" id="warningBox">
+                    ⚠ <span id="warningText"></span>
                 </div>
 
                 <div class="sensory-grid" id="sensoryGrid"></div>
@@ -506,6 +522,14 @@ document.getElementById('scoreForm').onsubmit = async function(e) {
     document.getElementById('规则基础分').textContent = r.特征贡献.规则基础分.toFixed(2);
     document.getElementById('校准偏移').textContent = '+' + r.特征贡献.校准偏移.toFixed(2);
     document.getElementById('陈酿月').textContent = data.醋龄月 + '月';
+
+    const warningBox = document.getElementById('warningBox');
+    if (r.ph_warning) {
+        document.getElementById('warningText').textContent = r.ph_warning;
+        warningBox.classList.add('show');
+    } else {
+        warningBox.classList.remove('show');
+    }
 
     const sensoryMap = {
         's_醋酸味':'酸味','s_苦味':'苦味','s_甜味':'甜味','s_咸味':'咸味',
