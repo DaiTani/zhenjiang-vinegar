@@ -26,10 +26,50 @@ DATA_DIR = BASE_DIR / "data"
 class ZAVScoringSystem:
     """镇江香醋风味评分系统 v2.0 - 规则引擎+线性校准"""
 
+    REASONABLE_RANGES = {
+        "醋龄月": (0, 120),
+        "总酸": (3.0, 10.0),
+        "不挥发酸": (0.5, 3.5),
+        "还原糖": (0.5, 5.0),
+        "总游离氨基酸": (0.1, 10.0),
+        "乙酸乙酯": (100, 5000),
+        "四甲基吡嗪": (5, 200),
+        "乙酸": (0.5, 8.0),
+        "pH": (2.0, 5.5),
+    }
+
+    FIELD_NAMES = {
+        "醋龄月": "醋龄",
+        "总酸": "总酸",
+        "不挥发酸": "不挥发酸",
+        "还原糖": "还原糖",
+        "总游离氨基酸": "总游离氨基酸",
+        "乙酸乙酯": "乙酸乙酯",
+        "四甲基吡嗪": "四甲基吡嗪",
+        "乙酸": "乙酸",
+        "pH": "pH值",
+    }
+
     def __init__(self, alpha=0.9906, beta=1.2503):
         self.alpha = alpha
         self.beta = beta
         self.fitted = True
+
+    def validate_sample(self, sample: dict) -> list:
+        """校验输入样本, 返回警告列表 (字段名, 当前值, 范围)"""
+        warnings = []
+        for key, (lo, hi) in self.REASONABLE_RANGES.items():
+            if key not in sample:
+                continue
+            val = sample[key]
+            if pd.isna(val):
+                continue
+            if val < lo or val > hi:
+                name = self.FIELD_NAMES.get(key, key)
+                warnings.append(
+                    f"{name}={val:.2f}超出合理范围[{lo}, {hi}], 评分可能不可靠"
+                )
+        return warnings
 
     def compute_base(self, sample: dict, use_ph: bool = True) -> dict:
         """计算规则基础分 (物理/化学可解释)"""
@@ -213,8 +253,9 @@ class ZAVScoringSystem:
           use_ph: bool, 是否启用pH维度评分 (默认开启)
 
         返回:
-          dict: 包含11维感官评分 + 综合得分 + 等级 + (可选)特征贡献
+          dict: 包含11维感官评分 + 综合得分 + 等级 + (可选)特征贡献 + 警告列表
         """
+        warnings = self.validate_sample(sample)
         raw = self.compute_base(sample, use_ph=use_ph)
         base = raw["base"]
         calibrated = self.alpha * base + self.beta
@@ -243,6 +284,7 @@ class ZAVScoringSystem:
             "综合得分": round(calibrated, 2),
             "等级": self._grade(calibrated),
             "_use_ph": use_ph,
+            "warnings": warnings,
         }
         if raw.get("ph_warning"):
             result["ph_warning"] = raw["ph_warning"]

@@ -259,6 +259,7 @@ HTML_TEMPLATE = """
             color: #f0c060;
         }
         .warning-box.show { display: block; }
+        .warning-box ul { margin: 4px 0 0 0; padding-left: 20px; }
 
         .contribution-section {
             margin-top: 24px;
@@ -364,7 +365,7 @@ HTML_TEMPLATE = """
             <form id="scoreForm">
                 <div class="row">
                     <div class="form-group">
-                        <label>醋龄月</label>
+                        <label>醋龄月 <span style="color:#888;font-size:0.85em">(0-120)</span></label>
                         <input type="number" name="醋龄月" id="醋龄月" value="60" min="0" max="120">
                     </div>
                     <div class="form-group">
@@ -378,41 +379,41 @@ HTML_TEMPLATE = """
 
                 <div class="row">
                     <div class="form-group">
-                        <label>总酸 (g/100mL)</label>
-                        <input type="number" name="总酸" id="总酸" value="6.32" step="0.01" min="0">
+                        <label>总酸 (g/100mL) <span style="color:#888;font-size:0.85em">(3-10)</span></label>
+                        <input type="number" name="总酸" id="总酸" value="6.32" step="0.01" min="3" max="10">
                     </div>
                     <div class="form-group">
-                        <label>不挥发酸 (g/100mL)</label>
-                        <input type="number" name="不挥发酸" id="不挥发酸" value="1.85" step="0.01" min="0">
-                    </div>
-                </div>
-
-                <div class="row">
-                    <div class="form-group">
-                        <label>还原糖 (g/100mL)</label>
-                        <input type="number" name="还原糖" id="还原糖" value="0.93" step="0.01" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label>总游离氨基酸 (g/100mL)</label>
-                        <input type="number" name="总游离氨基酸" id="总游离氨基酸" value="4.0" step="0.01" min="0">
+                        <label>不挥发酸 (g/100mL) <span style="color:#888;font-size:0.85em">(0.5-3.5)</span></label>
+                        <input type="number" name="不挥发酸" id="不挥发酸" value="1.85" step="0.01" min="0.5" max="3.5">
                     </div>
                 </div>
 
                 <div class="row">
                     <div class="form-group">
-                        <label>乙酸乙酯 (μg/mL)</label>
-                        <input type="number" name="乙酸乙酯" id="乙酸乙酯" value="1500" step="1" min="0">
+                        <label>还原糖 (g/100mL) <span style="color:#888;font-size:0.85em">(0.5-5)</span></label>
+                        <input type="number" name="还原糖" id="还原糖" value="0.93" step="0.01" min="0.5" max="5">
                     </div>
                     <div class="form-group">
-                        <label>四甲基吡嗪 (μg/mL)</label>
-                        <input type="number" name="四甲基吡嗪" id="四甲基吡嗪" value="44" step="1" min="0">
+                        <label>总游离氨基酸 (g/100mL) <span style="color:#888;font-size:0.85em">(0.1-10)</span></label>
+                        <input type="number" name="总游离氨基酸" id="总游离氨基酸" value="4.0" step="0.01" min="0.1" max="10">
                     </div>
                 </div>
 
                 <div class="row">
                     <div class="form-group">
-                        <label>乙酸 (g/100mL)</label>
-                        <input type="number" name="乙酸" id="乙酸" value="2.31" step="0.01" min="0">
+                        <label>乙酸乙酯 (μg/mL) <span style="color:#888;font-size:0.85em">(100-5000)</span></label>
+                        <input type="number" name="乙酸乙酯" id="乙酸乙酯" value="1500" step="1" min="100" max="5000">
+                    </div>
+                    <div class="form-group">
+                        <label>四甲基吡嗪 (μg/mL) <span style="color:#888;font-size:0.85em">(5-200)</span></label>
+                        <input type="number" name="四甲基吡嗪" id="四甲基吡嗪" value="44" step="1" min="5" max="200">
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="form-group">
+                        <label>乙酸 (g/100mL) <span style="color:#888;font-size:0.85em">(0.5-8)</span></label>
+                        <input type="number" name="乙酸" id="乙酸" value="2.31" step="0.01" min="0.5" max="8">
                     </div>
                     <div class="form-group">
                         <label>pH值 <span style="color:#888;font-size:0.85em">(2.0-5.5)</span></label>
@@ -468,7 +469,8 @@ HTML_TEMPLATE = """
                 </div>
 
                 <div class="warning-box" id="warningBox">
-                    ⚠ <span id="warningText"></span>
+                    ⚠ <span id="warningTitle">输入数据警告:</span>
+                    <ul id="warningList"></ul>
                 </div>
 
                 <div class="sensory-grid" id="sensoryGrid"></div>
@@ -524,8 +526,16 @@ document.getElementById('scoreForm').onsubmit = async function(e) {
     document.getElementById('陈酿月').textContent = data.醋龄月 + '月';
 
     const warningBox = document.getElementById('warningBox');
-    if (r.ph_warning) {
-        document.getElementById('warningText').textContent = r.ph_warning;
+    const warningList = document.getElementById('warningList');
+    warningList.innerHTML = '';
+    const warnings = r.warnings || [];
+    if (r.ph_warning) warnings.push(r.ph_warning);
+    if (warnings.length > 0) {
+        warnings.forEach(w => {
+            const li = document.createElement('li');
+            li.textContent = w;
+            warningList.appendChild(li);
+        });
         warningBox.classList.add('show');
     } else {
         warningBox.classList.remove('show');
