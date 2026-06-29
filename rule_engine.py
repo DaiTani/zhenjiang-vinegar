@@ -161,6 +161,14 @@ class ZAVScoringSystem:
         else:
             fu = min(10.0, 9.0 + (total_aa - 3.0) * 0.2)
 
+        # f_process: 工艺加成 (固态发酵=1 > 封闭式=0)
+        # 训练数据: 固态工艺样本的酱香/谷物香/风味普遍高0.5-1.0分
+        process = sample.get("工艺", 1)
+        if pd.isna(process) or process == 1:
+            fproc = 7.0
+        else:
+            fproc = 5.5
+
         # f_ph: pH舒适度 (影响柔和感/刺激感)
         # 镇江香醋理想范围 pH 3.0-3.8, 低于3.0过酸, 高于3.8过淡
         if pd.isna(ph) or not use_ph:
@@ -194,12 +202,14 @@ class ZAVScoringSystem:
                 fph = 3.0
                 ph_warning = f"pH={ph:.2f}偏高(>5.0), 评分降低"
 
-        w = {"f_age": 0.28, "f_ethyl": 0.18, "f_tmp": 0.14,
-             "f_acidity": 0.14, "f_sugar": 0.09, "f_umami": 0.09,
-             "f_ph": 0.08 if use_ph else 0.0}
+        w = {"f_age": 0.25, "f_ethyl": 0.16, "f_tmp": 0.13,
+             "f_acidity": 0.13, "f_sugar": 0.08, "f_umami": 0.08,
+             "f_proc": 0.10,
+             "f_ph": 0.07 if use_ph else 0.0}
 
         base = (fa * w["f_age"] + fe * w["f_ethyl"] + ft * w["f_tmp"]
                 + fac * w["f_acidity"] + fs * w["f_sugar"] + fu * w["f_umami"]
+                + fproc * w["f_proc"]
                 + (fph * w["f_ph"] if use_ph else 0.0))
 
         return {
@@ -207,14 +217,17 @@ class ZAVScoringSystem:
             "components": {
                 "f_age": fa, "f_ethyl": fe, "f_tmp": ft,
                 "f_acidity": fac, "f_sugar": fs, "f_umami": fu,
+                "f_proc": fproc,
                 "f_ph": fph, "f_ph_active": ph_active,
             },
             "weights": w,
             "ph_warning": ph_warning,
         }
 
-    def _raw_to_sensory(self, raw: dict) -> dict:
-        """规则分 → 11维感官空间"""
+    def _raw_to_sensory(self, raw: dict, process: int = 1) -> dict:
+        """规则分 → 11维感官空间
+        process: 0=封闭式, 1=固态/手工 (固态发酵对酱香/谷物香有加成)
+        """
         c = raw["components"]
         fa = c["f_age"]
         fe = c["f_ethyl"]
@@ -228,14 +241,21 @@ class ZAVScoringSystem:
         ph_bonus_soft = fph * 0.3 if ph_active else 0.0
         ph_penalty_sour = fph * 0.1 if ph_active else 0.0
 
+        # 工艺加成: 固态发酵(1) > 封闭式(0)
+        # 基于训练数据: 固态工艺样本的酱香/谷物香/风味比封闭式高0.5-1.0
+        process_bonus = 0.5 if process == 1 else 0.0
+        jiang_bonus = 0.4 * process_bonus
+        guwu_bonus = 0.3 * process_bonus
+        fengwei_bonus = 0.2 * process_bonus
+
         mapped = {
             "s_醋酸味": np.clip(fac * 0.6 + fa * 0.2 + fu * 0.2 - ph_penalty_sour, 1.0, 10.0),
             "s_苦味": np.clip(8.0 - min(5.0, fa * 0.5 + fac * 0.3), 1.0, 10.0),
             "s_甜味": np.clip(fs * 0.5 + fu * 0.3 + fe * 0.2, 1.0, 10.0),
             "s_咸味": np.clip(4.0 + fac * 0.1, 1.0, 10.0),
-            "s_风味": np.clip(fa * 0.3 + fe * 0.25 + ft * 0.25 + fac * 0.1 + fs * 0.1, 1.0, 10.0),
-            "s_酱香": np.clip(ft * 0.7 + fa * 0.2 + fu * 0.1, 1.0, 10.0),
-            "s_谷物香": np.clip(fe * 0.5 + fa * 0.3 + ft * 0.2, 1.0, 10.0),
+            "s_风味": np.clip(fa * 0.3 + fe * 0.25 + ft * 0.25 + fac * 0.1 + fs * 0.1 + fengwei_bonus, 1.0, 10.0),
+            "s_酱香": np.clip(ft * 0.7 + fa * 0.2 + fu * 0.1 + jiang_bonus, 1.0, 10.0),
+            "s_谷物香": np.clip(fe * 0.5 + fa * 0.3 + ft * 0.2 + guwu_bonus, 1.0, 10.0),
             "s_炒米香": np.clip(ft * 0.5 + fa * 0.3 + fac * 0.2, 1.0, 10.0),
             "s_米醋香": np.clip(fac * 0.6 + fe * 0.3 + fs * 0.1, 1.0, 10.0),
             "s_持久度": np.clip(fa * 0.6 + ft * 0.2 + fac * 0.2, 1.0, 10.0),
@@ -248,7 +268,7 @@ class ZAVScoringSystem:
         评分预测
 
         参数:
-          sample: dict, 包含醋龄月/总酸/乙酸乙酯/四甲基吡嗪/还原糖/总游离氨基酸
+          sample: dict, 包含醋龄月/总酸/乙酸乙酯/四甲基吡嗪/还原糖/总游离氨基酸/工艺
           explain: bool, 是否输出特征贡献度分解
           use_ph: bool, 是否启用pH维度评分 (默认开启)
 
@@ -256,11 +276,12 @@ class ZAVScoringSystem:
           dict: 包含11维感官评分 + 综合得分 + 等级 + (可选)特征贡献 + 警告列表
         """
         warnings = self.validate_sample(sample)
+        process = int(sample.get("工艺", 1))
         raw = self.compute_base(sample, use_ph=use_ph)
         base = raw["base"]
         calibrated = self.alpha * base + self.beta
 
-        sensory = self._raw_to_sensory(raw)
+        sensory = self._raw_to_sensory(raw, process=process)
 
         w = raw["weights"]
         c = raw["components"]
@@ -271,6 +292,7 @@ class ZAVScoringSystem:
             "酸度贡献": round(c["f_acidity"] * w["f_acidity"], 3),
             "甜味贡献": round(c["f_sugar"] * w["f_sugar"], 3),
             "鲜味贡献": round(c["f_umami"] * w["f_umami"], 3),
+            "工艺贡献": round(c["f_proc"] * w["f_proc"], 3),
         }
         if use_ph and c.get("f_ph_active", False):
             contrib["pH贡献"] = round(c["f_ph"] * w["f_ph"], 3)
@@ -284,6 +306,7 @@ class ZAVScoringSystem:
             "综合得分": round(calibrated, 2),
             "等级": self._grade(calibrated),
             "_use_ph": use_ph,
+            "_process": process,
             "warnings": warnings,
         }
         if raw.get("ph_warning"):

@@ -561,7 +561,7 @@ document.getElementById('scoreForm').onsubmit = async function(e) {
     const contribMap = {
         '陈酿贡献':'陈酿','酯香贡献':'酯香(OAV)','酱香贡献':'酱香(TMP)',
         '酸度贡献':'酸度','甜味贡献':'甜味','鲜味贡献':'鲜味',
-        'pH贡献':'pH舒适度'
+        '工艺贡献':'工艺加成','pH贡献':'pH舒适度'
     };
     const contribList = document.getElementById('contribList');
     contribList.innerHTML = '';
